@@ -1,5 +1,14 @@
 stages:
   - build
+  - diff
+  - deploy
+
+.helmfile-template:
+  image: ghcr.io/helmfile/helmfile:v0.150.0
+  before_script:
+    - export KUBECONFIG="$KUBECONFIG"
+    - if [ -f image_tag.txt ]; then export IMAGE_TAG=$(cat image_tag.txt); fi
+    - echo "Using IMAGE_TAG - $IMAGE_TAG"
 
 docker-build:
   stage: build
@@ -17,19 +26,63 @@ docker-build:
       else
         IMAGE_TAG="${CI_COMMIT_SHORT_SHA}"
       fi
-    - echo "Using image tag - $IMAGE_TAG"
-    - docker context create mycontext || true
-    - docker buildx create --name mybuilder --use mycontext
-    - docker buildx inspect --bootstrap
+    - docker buildx create --use
     - |
       docker buildx build \
       --platform linux/amd64,linux/arm64 \
       -t "$CI_REGISTRY_IMAGE:$IMAGE_TAG" \
       --push .
-
+    - echo "$IMAGE_TAG" > image_tag.txt
+  artifacts:
+    paths:
+      - image_tag.txt
+    expire_in: 1h
   rules:
     - if: $CI_COMMIT_TAG
-      when: always
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "dev"
       when: manual
-  
+
+diff-dev:
+  extends: .helmfile-template
+  stage: diff
+  dependencies:
+    - docker-build
+  script:
+    - helmfile -e default diff --set image.tag=$IMAGE_TAG
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+      when: manual
+
+deploy-dev:
+  extends: .helmfile-template
+  stage: deploy
+  dependencies:
+    - docker-build
+  script:
+    - helmfile -e default apply --set image.tag=$IMAGE_TAG
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+      when: manual
+
+diff-prod:
+  extends: .helmfile-template
+  stage: diff
+  dependencies:
+    - docker-build
+  script:
+    - helmfile -e production diff --set image.tag=$IMAGE_TAG
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+
+deploy-prod:
+  extends: .helmfile-template
+  stage: deploy
+  dependencies:
+    - docker-build
+  script:
+    - helmfile -e production apply --set image.tag=$IMAGE_TAG
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual

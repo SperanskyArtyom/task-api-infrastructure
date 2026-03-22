@@ -1,0 +1,19 @@
+environments:
+  default:
+    values:
+      - replicaCount: 1
+        env:
+          FLASK_ENV: "development"
+  production:
+    values:
+      - replicaCount: 3
+        env:
+          FLASK_ENV: "production"
+
+releases:
+  - name: "task-api-{{ .Environment.Name }}"
+    chart: ./helm
+    namespace: "task-api-{{ .Environment.Name }}"
+    values:
+      - ./helm/values.yaml
+      - {{ .Environment.Values | toYaml | nindent 8 }}
