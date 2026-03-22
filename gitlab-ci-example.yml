@@ -1,0 +1,35 @@
+stages:
+  - build
+
+docker-build:
+  stage: build
+  image: docker:cli
+  services:
+    - docker:dind
+  variables:
+    DOCKER_DRIVER: overlay2
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+  script:
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        IMAGE_TAG="$CI_COMMIT_TAG"
+      else
+        IMAGE_TAG="${CI_COMMIT_SHORT_SHA}"
+      fi
+    - echo "Using image tag - $IMAGE_TAG"
+    - docker context create mycontext || true
+    - docker buildx create --name mybuilder --use mycontext
+    - docker buildx inspect --bootstrap
+    - |
+      docker buildx build \
+      --platform linux/amd64,linux/arm64 \
+      -t "$CI_REGISTRY_IMAGE:$IMAGE_TAG" \
+      --push .
+
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: always
+    - if: $CI_COMMIT_BRANCH
+      when: manual
+  
